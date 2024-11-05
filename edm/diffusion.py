@@ -1,6 +1,7 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
+import pytorch_lightning as pl
 
 
 def extract(a: torch.Tensor,
@@ -9,6 +10,8 @@ def extract(a: torch.Tensor,
     """Get coefficients at given timesteps and reshape to [batch_size, 1, ...]."""
     bs, = t.shape
     assert x_shape[0] == bs
+
+    a = a.to(t.device)
     out = a[t]
 
     assert out.shape[0] == bs
@@ -26,22 +29,22 @@ def cosine_beta_schedule(timesteps, s=0.008):
 
 
 # Simple diffusion model training
-class Diffusion(nn.Module):
+class Diffusion(pl.LightningModule):
   """Basic Diffusion Model."""
 
-  def __init__(self, config, net):
+  def __init__(self, config, net, dim):
     super().__init__()
     # assert var_type in ('beta_forward', 'beta_reverse', 'learned')
     self.net = net
+    self._dim = dim
 
     self._var_type = config.var_type
     self._n_steps = config.n_steps
-    self._dim = config.dim
     self._loss_type = config.loss_type
     self._mc_loss = config.mc_loss
     self._samples_per_step = config.samples_per_step
     self._betas = torch.from_numpy(cosine_beta_schedule(config.n_steps))
-#    self._betas = torch.from_numpy(cosine_beta_schedule(config.n_steps)).to(device)
+#    self._betas = torch.from_numpy(cosine_beta_schedule(config.n_steps)).to(self.device)
 
     self._alphas = 1. - self._betas
     self._log_alphas = torch.log(self._alphas)
@@ -53,7 +56,7 @@ class Diffusion(nn.Module):
 
     self._alphas_cumprod = torch.cumprod(self._alphas, axis=0)
     self._alphas_cumprod_prev = torch.cat([torch.Tensor([1]), self._alphas_cumprod[:-1]])
-#    self._alphas_cumprod_prev = torch.cat([torch.Tensor([1]).to(device), self._alphas_cumprod[:-1]])
+#    self._alphas_cumprod_prev = torch.cat([torch.Tensor([1]).to(self.device), self._alphas_cumprod[:-1]])
     self._sqrt_alphas_cumprod = torch.sqrt(self._alphas_cumprod)
     self._sqrt_one_minus_alphas_cumprod = torch.sqrt(1 - self._alphas_cumprod)
     self._log_one_minus_alphas_cumprod = torch.log(1 - self._alphas_cumprod)
@@ -119,8 +122,13 @@ class Diffusion(nn.Module):
     if noise is None:
       noise = np.random.normal(size=x_0.shape)
 
-    x_t = extract(self._sqrt_alphas_cumprod, t, x_0.shape).to(self.device) * x_0 + extract(
-        self._sqrt_one_minus_alphas_cumprod, t, x_0.shape).to(self.device) * noise.to(self.device)
+#    print("device in q_sample")
+#    print(self.device)
+#    x_t = extract(self._sqrt_alphas_cumprod, t, x_0.shape).to(self.device) * x_0 + extract(
+#        self._sqrt_one_minus_alphas_cumprod, t, x_0.shape).to(self.device) * noise.to(self.device)
+
+    x_t = extract(self._sqrt_alphas_cumprod, t, x_0.shape) * x_0 + extract(
+        self._sqrt_one_minus_alphas_cumprod, t, x_0.shape) * noise
 
     return x_t
 
@@ -266,10 +274,12 @@ class Diffusion(nn.Module):
     """Sample from p(x)."""
 
     x = torch.Tensor(np.random.normal(size=(n, self._dim))).to(self.device)
+    s = s.unsqueeze(0).expand((n, -1))
 
     for i in range(self._n_steps):
       j = self._n_steps - 1 - i
       t = torch.ones((n,), dtype=torch.int64).to(self.device) * j
+#      t = torch.ones((n,), dtype=torch.int64) * j
       x = self.p_sample(x, t, s, clip=clip)
 
     return x
@@ -283,6 +293,7 @@ class Diffusion(nn.Module):
   def loss_mc(self, x, s, loss_type=None):
     """Compute training loss, uniformly sampling t's."""
 
+#    t = torch.from_numpy(np.random.randint(0, self._n_steps, size=(x.shape[0],))).to(self.device)
     t = torch.from_numpy(np.random.randint(0, self._n_steps, size=(x.shape[0],))).to(self.device)
     if loss_type == 'simple':
         loss = self.p_loss_simple(x, t, s)

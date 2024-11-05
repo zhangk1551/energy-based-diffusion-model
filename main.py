@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+import sys
+sys.path.insert(0, "../torchdriveenv")
+
 import os
 import random
 import argparse
@@ -25,32 +28,34 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--sweep_id', type=str, default=None)
 parser.add_argument('--wandb_mode', type=str, default="offline")
 parser.add_argument('--conf', type=str,
-                    default="conf/torchdriveenv_policy.yaml")
+                    default="conf/torchdriveenv_policy.yml")
 
 
 # os.environ["WANDB_API_KEY"] = ""
-PROJECT = "edm"
+PROJECT = "EDM"
 
 def main(config=None):
     wandb_logger = WandbLogger(project=PROJECT, log_model=True)
 
     seed = config.seed
     if seed is None:
-        seed = random.randint(1000)
+        seed = random.randint(0, 100000)
     pl.seed_everything(seed, workers=True)
 
     monitor = config.trainer.monitor
     monitor_mode = config.trainer.monitor_mode
-    wandb.define_metric(monitor, summary=monitor_mode)
+#    wandb.define_metric(monitor, summary=monitor_mode)
 
     data_module = EDMDataModule(config)
     data_module.prepare_datasets()
 
     checkpoint_callback = ModelCheckpoint(monitor=monitor, mode=monitor_mode, save_top_k=2,
                                           filename="{epoch:03d}-{train_loss:.2f}")
-    early_stop_callback = EarlyStopping(monitor=monitor,
-                                        mode=monitor_mode,
-                                        patience=config.trainer.early_stopping_patience)
+#    early_stop_callback = EarlyStopping(monitor=monitor,
+#                                        mode=monitor_mode,
+#                                        patience=config.trainer.early_stopping_patience)
+
+#                         strategy=config.trainer.strategy,
 
     trainer = pl.Trainer(max_epochs=config.trainer.max_epochs,
                          fast_dev_run=config.trainer.fast_dev_run,
@@ -58,20 +63,18 @@ def main(config=None):
                          accelerator='gpu',
                          devices=config.trainer.devices,
                          num_nodes=config.trainer.num_nodes,
-                         strategy=config.trainer.strategy,
                          logger=wandb_logger,
-                         track_grad_norm=2,
                          log_every_n_steps=5,
                          gradient_clip_val=0.5,
-                         callbacks=[early_stop_callback, checkpoint_callback] if config.trainer.overfit_batches == 0
+                         callbacks=[checkpoint_callback] if config.trainer.overfit_batches == 0
                          else None)
 
-    edm_module = EDMModule(config, x_dim=data_module.x_dim, s_dim=data_module.s_dim)
+    edm_module = EDMModule(config, x_dim=data_module.x_dim, s_dim=data_module.s_dim, eval_data=data_module.eval_data)
 
     trainer.fit(edm_module, datamodule=data_module)
 
-    if not config.trainer.fast_dev_run:
-        wandb.save(checkpoint_callback.best_model_path)
+#    if not config.trainer.fast_dev_run:
+#        wandb.save(checkpoint_callback.best_model_path)
 #        trainer.test(ckpt_path="best", datamodule=data_module)
 
 

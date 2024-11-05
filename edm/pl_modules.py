@@ -1,20 +1,27 @@
+import io
 import torch
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
+from PIL import Image
 
-from diffusion import Diffusion
-from models import EnergyModel, ScoreModel
+from edm.diffusion import Diffusion
+from edm.models import EnergyModel, ScoreModel
+from edm.utils import plot_samples, plot_energy
 
 
 class EDMModule(pl.LightningModule):
-    def __init__(self, config, x_dim, s_dim):
+    def __init__(self, config, x_dim, s_dim, eval_data=None):
         super().__init__()
         self.save_hyperparameters()
 
         self.config = config
+        self.n_eval_samples = config.diffusion.n_eval_samples
 
         self.net = ScoreModel(config=config.model, n_steps=config.diffusion.n_steps, x_dim=x_dim, s_dim=s_dim)
         self.ebm_net = EnergyModel(self.net)
-        self.diffusion = Diffusion(config.diffusion)
+        self.diffusion = Diffusion(config.diffusion, self.ebm_net, dim=x_dim)
+
+        self.eval_data = eval_data
 
 #        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -39,6 +46,7 @@ class EDMModule(pl.LightningModule):
 #                                              self.device,
 #                                              var_type="beta_forward").to(self.device)
 
+
     def training_step(self, batch, batch_idx):
         x, s = batch
         loss = self.diffusion.loss(x, s)
@@ -46,8 +54,20 @@ class EDMModule(pl.LightningModule):
         self.log_dict({"train_loss": loss})
         return loss
 
-#    def validation_step(self, batch, batch_idx):
-#        self._shared_eval_step(batch, "val")
+
+    def on_train_epoch_end(self):
+        if self.current_epoch % 100 == 0:
+            self.evaluate_model()
+
+
+    def evaluate_model(self):
+#        plt.figure(figsize=(6, 4))
+        x_samp = self.diffusion.sample(s=self.eval_data["recurrent_state"].to(self.device), n=self.n_eval_samples).cpu().detach().numpy()
+        sample_image = plot_samples(x_samp)
+
+        energy_image = plot_energy(self.diffusion.p_energy, t=0, s=self.eval_data["recurrent_state"], device=self.device)
+
+        self.logger.log_image(key="samples", images=[self.eval_data["obs"], sample_image, energy_image], caption=["observation", "action samples", "action_energy"])
 #
 #    def test_step(self, batch, batch_idx):
 #        self._shared_eval_step(batch, "test")

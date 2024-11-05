@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 class TorchDriveEnvEpisodeDataset(Dataset):
-    def __init__(self, data_dir, keys, condition_keys, constraints):
+    def __init__(self, data_dir, diffusion_keys, condition_keys, constraints=None):
         super().__init__()
         self.data_dir = data_dir
 
@@ -28,13 +28,13 @@ class TorchDriveEnvEpisodeDataset(Dataset):
             file_path = os.path.join(data_dir, file)
             with open(file_path, "rb") as f:
                 episode_data = pickle.load(f)
-            if ("location" in constraints) and (episode_data.location not in constraints["location"]):
+            if (constraints is not None) and ("location" in constraints) and (episode_data.location not in constraints["location"]):
                 continue
             for step_data in episode_data.step_data:
-                if len(keys) == 1:
-                    x = get_value(keys[0], step_data)
+                if len(diffusion_keys) == 1:
+                    x = get_value(diffusion_keys[0], step_data)
                 else:
-                    x = "_".join([get_value(key, step_data) for key in keys])
+                    x = "_".join([get_value(key, step_data) for key in diffusion_keys])
                 if condition_keys is None:
                     s = None
                 elif len(condition_keys) == 1:
@@ -58,7 +58,7 @@ class EDMDataModule(pl.LightningDataModule):
     def __init__(self, config):
         super().__init__()
         self.task = config.task
-        self.keys = config.keys
+        self.diffusion_keys = config.diffusion_keys
         self.condition_keys = config.condition_keys
         self.constraints = config.data.constraints
         self.train_data_dir = config.data.train_data_dir
@@ -68,16 +68,33 @@ class EDMDataModule(pl.LightningDataModule):
 
     def prepare_datasets(self):
         if self.task == "torchdriveenv":
-            self.train_dataset = TorchDriveEnvEpisodeDataset(self.train_data_dir, self.keys, self.condition_keys, self.constraints)
-            self.val_dataset = TorchDriveEnvEpisodeDataset(self.val_data_dir, self.keys, self.condition_keys, self.constraints)
+            self.train_dataset = TorchDriveEnvEpisodeDataset(self.train_data_dir, self.diffusion_keys, self.condition_keys, self.constraints)
+            if self.val_data_dir is not None:
+                self.val_dataset = TorchDriveEnvEpisodeDataset(self.val_data_dir, self.diffusion_keys, self.condition_keys, self.constraints)
         self.size = len(self.train_dataset)
+        self.x_dim = self.train_dataset.x_dim
+        self.s_dim = self.train_dataset.s_dim
+
+        self.eval_data = self._read_eval_data()
+
+    def _read_eval_data(self):
+        with open('data/test_eval_data/recurrent_state.pkl', 'rb') as f:
+            recurrent_state = pickle.load(f)
+        with open('data/test_eval_data/obs.pkl', 'rb') as f:
+            obs = pickle.load(f)
+        eval_data = {"recurrent_state": recurrent_state, "obs": obs}
+        return eval_data
 
     def __len__(self):
         return self.size
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size,
-                          drop_last=True, pin_memory=True, num_workers=self.num_workers)
+                          drop_last=True, num_workers=0)
+
+#    def val_dataloader(self):
+#        return DataLoader(self.val_dataset, batch_size=self.batch_size,
+#                          drop_last=True, num_workers=0)
 
 # class DataSampler():
 #     def __init__(self, data, device):
@@ -88,10 +105,10 @@ class EDMDataModule(pl.LightningDataModule):
 #         self.size = next(iter(data.values())).shape[0]
 #         self.device = device
 # 
-#     def sample(self, keys, batch_size, concat=False):
+#     def sample(self, diffusion_keys, batch_size, concat=False):
 #         ind = torch.randint(0, self.size, size=(batch_size,))
 #         samples = {}
-#         for key in keys:
+#         for key in diffusion_keys:
 #           samples[key] = self.data[key][ind].to(self.device)
 # 
 #         if concat:

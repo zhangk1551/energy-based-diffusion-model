@@ -22,11 +22,12 @@ class ModelConfig:
 
 @dataclass
 class DiffusionConfig:
-    n_step: int = 100
+    n_steps: int = 100
     mc_loss: bool = True
     loss_type: str = 'simple'
-    var_type: str = 'learned'
+    var_type: str = 'beta_forward'
     samples_per_step: int = 1
+    n_eval_samples: int = 100
 
 
 @dataclass
@@ -40,15 +41,16 @@ class TrainerConfig:
     num_nodes: int = 1
     lr: float = 0.0001
     optim_method: str = "SGD"
+    strategy: Optional[str] = None
 
 
 @dataclass
 class EDMConfig:
     task: str
-    keys: List[str]
-    condition_keys: Optional[List[str]] = None
-    seed: Optional[int] = None
+    diffusion_keys: List[str]
     data: DataConfig
     model: ModelConfig
     diffusion: DiffusionConfig
     trainer: TrainerConfig
+    condition_keys: Optional[List[str]] = None
+    seed: Optional[int] = None

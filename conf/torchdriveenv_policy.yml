@@ -2,9 +2,9 @@ task: "torchdriveenv"
 diffusion_keys: ["action"]
 condition_keys: ["recurrent_state"]
 data:
-  train_data_dir: "data/itra_data"
-  val_data_dir: "data/itra_data"
-  batch_size: 4096
+  train_data_dir: "data/waypoint_graph_no_rendering_test"
+  val_data_dir: "data/waypoint_graph_no_rendering_test"
+  batch_size: 32
   dataloader_num_workers: 2
 model:
   h_dim: 128

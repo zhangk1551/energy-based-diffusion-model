@@ -1,6 +1,50 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pytorch_lightning as pl
+
+
+class CNN(pl.LightningModule):
+    def __init__(self, input_shape, output_size=128):
+        super().__init__()
+
+        downsample_kernel_size = math.ceil(input_shape[-1] / 256)
+        self.pool0 = nn.AvgPool2d(downsample_kernel_size)
+
+        self.conv1 = nn.Conv2d(3, 16, 3)
+        self.conv2 = nn.Conv2d(16, 16, 3)
+        self.conv3 = nn.Conv2d(16, 32, 3)
+        self.conv4 = nn.Conv2d(32, 32, 3)
+
+        self.pool1 = nn.MaxPool2d(2)
+
+        n_sizes = self._get_conv_output(input_shape)
+
+        self.fc1 = nn.Linear(n_sizes, 512)
+        self.fc2 = nn.Linear(512, output_size)
+
+    def _get_conv_output(self, shape):
+        input = torch.autograd.Variable(torch.rand(1, *shape))
+
+        output_feat = self._forward_features(input)
+        n_size = output_feat.data.view(1, -1).size(1)
+        return n_size
+
+    def _forward_features(self, x):
+        x = self.pool0(x)
+        x = F.relu(self.conv1(x))
+        x = self.pool1(F.relu(self.conv2(x)))
+        x = F.relu(self.conv3(x))
+        x = self.pool1(F.relu(self.conv4(x)))
+        return x
+
+    def forward(self, x):
+        x = self._forward_features(x)
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return x
 
 
 class ScoreModel(nn.Module):
@@ -17,9 +61,15 @@ class ScoreModel(nn.Module):
         h_dim = config.h_dim
         emb_dim = config.emb_dim
         widen = config.widen
+        self.image_encoder = None
 
         if s_dim is not None:
-            self.layer_x = nn.Linear(x_dim + s_dim, h_dim)
+            if type(s_dim) is int:
+                self.layer_x = nn.Linear(x_dim + s_dim, h_dim)
+            else:
+                s_out_dim = 128
+                self.image_encoder = CNN(input_shape=s_dim, output_size=s_out_dim)
+                self.layer_x = nn.Linear(x_dim + s_out_dim, h_dim)
         else:
             self.layer_x = nn.Linear(x_dim, h_dim)
 
@@ -48,6 +98,8 @@ class ScoreModel(nn.Module):
 
         if s is not None:
             s = torch.atleast_2d(s)
+            if self.image_encoder is not None:
+                s = self.image_encoder(s)
             x = torch.cat([x, s], dim=-1)
 
         emb = self.time_emb(t)
@@ -87,6 +139,7 @@ class EnergyModel(nn.Module):
     def __call__(self, x, t, s):
         neg_logp_unnorm = lambda _x: self.neg_logp_unnorm(_x, t, s).sum()
         return torch.func.grad(neg_logp_unnorm)(x)
+
 
 
 # class ConditionalResnet(nn.Module):

@@ -1,12 +1,14 @@
-import io
+import os
 import torch
-import matplotlib.pyplot as plt
+import random
 import pytorch_lightning as pl
+import numpy as np
+
 from PIL import Image
 
 from edm.diffusion import Diffusion
 from edm.models import EnergyModel, ScoreModel
-from edm.utils import plot_samples, plot_energy
+from edm.utils import plot_samples, plot_energy, get_episode_data, to_gif
 
 
 class EDMModule(pl.LightningModule):
@@ -23,29 +25,6 @@ class EDMModule(pl.LightningModule):
 
         self.eval_data = eval_data
 
-#        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-#        if config.is_conditional:
-#            self.net = ConditionalResnet(n_steps=config.n_steps,
-#                                         n_layers=4,
-#                                         x_dim=config.data_dim,
-#                                         h_dim=128,
-#                                         emb_dim=32)
-#            self.ebm_net = ConditionalEBMDiffusionModel(self.net)
-#        else:
-#            self.net = Resnet(n_steps=config.n_steps,
-#                              n_layers=4,
-#                              x_dim=config.data_dim,
-#                              h_dim=128,
-#                              emb_dim=32)
-#            self.ebm_net = EnergyModel(self.net)
-#
-#        self.diffusion_model = DiffusionModel(config.data_dim,
-#                                              config.n_steps,
-#                                              self.ebm_net,
-#                                              self.device,
-#                                              var_type="beta_forward").to(self.device)
-
 
     def training_step(self, batch, batch_idx):
         x, s = batch
@@ -56,43 +35,38 @@ class EDMModule(pl.LightningModule):
 
 
     def on_train_epoch_end(self):
-        if self.current_epoch % 100 == 0:
+        if self.current_epoch % 20 == 0:
             self.evaluate_model()
 
 
+    def pick_evaluate_episode(self):
+        data_dir = "/home/kezhang/work/fall_2024/energy-based-diffusion-model/data/waypoint_graph_no_rendering_test"
+        file_paths = [os.path.join(data_dir, file) for file in os.listdir(data_dir)]
+        while True:
+            file_path = random.choice(file_paths)
+            file_path = "/home/kezhang/work/fall_2024/energy-based-diffusion-model/data/waypoint_graph_no_rendering_test/episode_9_95910.pkl"
+            obs_images, recurrent_states, actions = get_episode_data(file_path)
+            if len(actions) > 0:
+                return obs_images, recurrent_states, actions
+
+
     def evaluate_model(self):
-#        plt.figure(figsize=(6, 4))
-        x_samp = self.diffusion.sample(s=self.eval_data["recurrent_state"].to(self.device), n=self.n_eval_samples).cpu().detach().numpy()
-        sample_image = plot_samples(x_samp)
+        obs_birdviews, recurrent_states, actions = self.pick_evaluate_episode()
+        obs_images = [Image.fromarray(img.cpu().numpy().astype(np.uint8).transpose(1, 2, 0), 'RGB') for img in obs_birdviews]
+        x_samples = [self.diffusion.sample(s=obs_birdview.to(self.device), n=self.n_eval_samples).cpu().detach().numpy() for obs_birdview in obs_birdviews]
+#        x_samples = [self.diffusion.sample(s=recurrent_state.to(self.device), n=self.n_eval_samples).cpu().detach().numpy() for recurrent_state in recurrent_states]
+        sample_images = [plot_samples(x_sample) for x_sample in x_samples]
 
-        energy_image = plot_energy(self.diffusion.p_energy, t=0, s=self.eval_data["recurrent_state"], device=self.device)
+#        energy_images = [plot_energy(self.diffusion.p_energy, t=0, s=recurrent_state, device=self.device) for recurrent_state in recurrent_states]
+        energy_images = [plot_energy(self.diffusion.p_energy, t=0, s=obs_birdview, device=self.device) for obs_birdview in obs_birdviews]
 
-        self.logger.log_image(key="samples", images=[self.eval_data["obs"], sample_image, energy_image], caption=["observation", "action samples", "action_energy"])
-#
-#    def test_step(self, batch, batch_idx):
-#        self._shared_eval_step(batch, "test")
-#
-#    def predict_step(self, batch, batch_idx):
-#        x, y = batch
-#        y_hat = self.model(x).squeeze()
-#        return y_hat
-#
-#    def _shared_eval_step(self, batch, stage):
-#        x, y = batch
-#        y_hat = self.model(x).squeeze()
-#        loss = self.criterion(y_hat, self._format_y(y))
-#        self.log_dict({f"{stage}_loss": loss})
+        self.logger.log_video(key="samples",
+                              videos=[to_gif(obs_images, gif_name="obs.gif"),
+                                      to_gif(sample_images, gif_name="sample.gif"),
+                                      to_gif(energy_images, gif_name="energy.gif")],
+                              caption=["observation", "action samples", "action_energy"],
+                              format=["gif"] * 3)
 
-#        metrics = self.calc_metrics(y_hat, y, self.config.module.task.value, self.config.module.num_classes, stage)
-#        self.log_dict(metrics)
-#
-#    def calc_metrics(self, y_hat, y, task, num_classes, stage):
-#
-#        return {f"{stage}_accuracy": acc,
-#                f"{stage}_precision": prec,
-#                f"{stage}_recall": rec,
-#                f"{stage}_f1": f1,
-#                f"{stage}_mean_absolute_error": mae}
 
     def configure_optimizers(self):
         lr = self.config.trainer.lr

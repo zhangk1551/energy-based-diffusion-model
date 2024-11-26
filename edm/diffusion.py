@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import pytorch_lightning as pl
 
 
@@ -274,7 +273,7 @@ class Diffusion(pl.LightningModule):
     """Sample from p(x)."""
 
     x = torch.Tensor(np.random.normal(size=(n, self._dim))).to(self.device)
-    s = s.unsqueeze(0).expand((n, -1))
+    s = s.unsqueeze(0).expand((n, *s.shape))
 
     for i in range(self._n_steps):
       j = self._n_steps - 1 - i

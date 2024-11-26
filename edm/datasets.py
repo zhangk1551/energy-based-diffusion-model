@@ -1,9 +1,10 @@
 import os
 import pickle
 import logging
-import torch
 import pytorch_lightning as pl
 from torch.utils.data import Dataset, DataLoader
+
+from edm.utils import get_value
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -15,14 +16,6 @@ class TorchDriveEnvEpisodeDataset(Dataset):
         self.data_dir = data_dir
 
         self.data = []
-
-        def get_value(key, step_data):
-            if key == "obs_birdview":
-                return step_data.obs_birdview.squeeze()
-            if key == "recurrent_state":
-                return torch.Tensor(step_data.recurrent_states[0]).squeeze() # .cuda()
-            if key == "action":
-                return step_data.ego_action.squeeze()
 
         for file in os.listdir(data_dir):
             file_path = os.path.join(data_dir, file)
@@ -44,8 +37,9 @@ class TorchDriveEnvEpisodeDataset(Dataset):
                 self.data.append((x, s))
 
         self.x_dim = self.data[0][0].shape[-1]
-        self.s_dim = self.data[0][1].shape[-1] if condition_keys is not None else None
-
+        self.s_dim = self.data[0][1].shape if condition_keys is not None else None
+        if len(self.s_dim) == 1:
+            self.s_dim = self.s_dim.item()
 
     def __len__(self):
         return len(self.data)
@@ -91,27 +85,3 @@ class EDMDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size,
                           drop_last=True, num_workers=0)
-
-#    def val_dataloader(self):
-#        return DataLoader(self.val_dataset, batch_size=self.batch_size,
-#                          drop_last=True, num_workers=0)
-
-# class DataSampler():
-#     def __init__(self, data, device):
-#         self.data = {}
-#         for key in data:
-#             self.data[key] = torch.from_numpy(data[key]).float()
-# 
-#         self.size = next(iter(data.values())).shape[0]
-#         self.device = device
-# 
-#     def sample(self, diffusion_keys, batch_size, concat=False):
-#         ind = torch.randint(0, self.size, size=(batch_size,))
-#         samples = {}
-#         for key in diffusion_keys:
-#           samples[key] = self.data[key][ind].to(self.device)
-# 
-#         if concat:
-#             return torch.cat(tuple(samples.values()), dim=-1)
-#         return samples
-# 

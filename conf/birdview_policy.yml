@@ -1,0 +1,21 @@
+task: "torchdriveenv"
+diffusion_keys: ["action"]
+condition_keys: ["obs_birdview"]
+data:
+  train_data_dir: "data/selected_more_waypoints"
+  val_data_dir: "data/selected_more_waypoints"
+  batch_size: 32
+  dataloader_num_workers: 2
+model:
+  h_dim: 128
+  emb_dim: 32
+  n_layers: 4
+diffusion:
+  n_steps: 100
+  n_eval_samples: 100
+trainer:
+  max_epochs: 100
+  fast_dev_run: False
+  overfit_batches: 0.0
+  lr: 0.00001
+  optim_method: "Adam"

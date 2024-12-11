@@ -55,14 +55,20 @@ def plot_samples(x):
     return to_image(plt)
 
 
+def plot_hist(x):
+    plt.hist(x, bins=10, edgecolor='black')
+    return to_image(plt)
+
+
 def get_value(key, step_data):
     if key == "obs_birdview":
         return torch.Tensor(step_data.obs_birdview).squeeze()
     if key == "recurrent_state":
         return torch.Tensor(step_data.recurrent_states[0]).squeeze()
     if key == "action":
-        return step_data.ego_action.squeeze()
-
+        action = step_data.ego_action.squeeze()
+        action[1] *= 10
+        return action
 
 def get_episode_data(episode_file_path):
     obs_birdviews = []

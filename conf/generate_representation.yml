@@ -1,0 +1,22 @@
+task: "torchdriveenv"
+diffusion_keys: ["obs_birdview"]
+data:
+  train_data_dir: "data/selected_more_waypoints"
+  val_data_dir: "data/tiny_test"
+  eval_obs_data_dirs: ["datasets/ppo_bad_policy_single/obs_data", "datasets/itra_single/obs_data", "datasets/irrelevant_obs_data_shuffled", "datasets/irrelevant_obs_data_cat"]
+  batch_size: 128
+  dataloader_num_workers: 32
+model:
+  h_dim: 128
+  emb_dim: 32
+  n_layers: 4
+#  image_encoder_x_path: "EDM/9cc7yc6i/checkpoints/epoch=089-train_loss=0.00.ckpt"
+diffusion:
+  n_steps: 1000
+  n_eval_samples: 2
+trainer:
+  max_epochs: 20000
+  fast_dev_run: False
+  overfit_batches: 0.0
+  lr: 0.0001
+  optim_method: "AdamW"

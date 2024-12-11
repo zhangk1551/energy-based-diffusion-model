@@ -1,0 +1,20 @@
+task: "torchdriveenv"
+diffusion_keys: ["recurrent_state"]
+data:
+  train_data_dir: "data/tiny_test"
+  val_data_dir: "data/tiny_test"
+  batch_size: 2
+  dataloader_num_workers: 2
+model:
+  h_dim: 128
+  emb_dim: 32
+  n_layers: 4
+diffusion:
+  n_steps: 10
+  n_eval_samples: 10
+trainer:
+  max_epochs: 20000
+  fast_dev_run: False
+  overfit_batches: 0.0
+  lr: 0.00001
+  optim_method: "Adam"

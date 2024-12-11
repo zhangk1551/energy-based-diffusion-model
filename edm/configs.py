@@ -6,6 +6,7 @@ from typing import Optional, List, Dict
 class DataConfig:
     train_data_dir: str
     val_data_dir: Optional[str] = None
+    eval_obs_data_dirs: Optional[List[str]] = None
     batch_size: int = 2
     dataloader_num_workers: int = 0
     constraints: Optional[Dict[str, List[str]]] = None
@@ -18,6 +19,7 @@ class ModelConfig:
     n_layers: int = 4
     widen: int = 2
     emb_type: str = 'learned'
+    image_encoder_x_path: Optional[str] = None
 
 
 @dataclass

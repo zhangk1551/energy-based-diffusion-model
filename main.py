@@ -69,7 +69,7 @@ def main(config=None):
                          callbacks=[checkpoint_callback] if config.trainer.overfit_batches == 0
                          else None)
 
-    edm_module = EDMModule(config, x_dim=data_module.x_dim, s_dim=data_module.s_dim, eval_data=data_module.eval_data)
+    edm_module = EDMModule(config, x_dim=data_module.x_dim, s_dim=data_module.s_dim, eval_datasets=data_module.eval_obs_datasets, x_mean=data_module.x_mean, x_std=data_module.x_std, x_transform=data_module.x_transform)
 
     trainer.fit(edm_module, datamodule=data_module)
 

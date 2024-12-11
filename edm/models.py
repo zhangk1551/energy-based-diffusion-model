@@ -21,8 +21,8 @@ class CNN(pl.LightningModule):
 
         n_sizes = self._get_conv_output(input_shape)
 
-        self.fc1 = nn.Linear(n_sizes, 512)
-        self.fc2 = nn.Linear(512, output_size)
+        self.fc1 = nn.Linear(n_sizes, 256)
+        self.fc2 = nn.Linear(256, output_size)
 
     def _get_conv_output(self, shape):
         input = torch.autograd.Variable(torch.rand(1, *shape))
@@ -47,28 +47,29 @@ class CNN(pl.LightningModule):
         return x
 
 
-class ScoreModel(nn.Module):
+class SimpleResNet(nn.Module):
     """
     Resnet score model.
 
     Adds embedding for each scale after each linear layer.
     """
 
-    def __init__(self, config, n_steps, x_dim, s_dim):
+    def __init__(self, config, n_steps, x_dim, s_dim, image_encoder_x=None):
         # assert emb_type in ('learned', 'sinusoidal')
         super().__init__()
         n_layers = config.n_layers
         h_dim = config.h_dim
         emb_dim = config.emb_dim
         widen = config.widen
-        self.image_encoder = None
+        self.image_encoder_x = image_encoder_x
+        self.image_encoder_s = None
 
         if s_dim is not None:
             if type(s_dim) is int:
                 self.layer_x = nn.Linear(x_dim + s_dim, h_dim)
             else:
                 s_out_dim = 128
-                self.image_encoder = CNN(input_shape=s_dim, output_size=s_out_dim)
+                self.image_encoder_s = CNN(input_shape=s_dim, output_size=s_out_dim)
                 self.layer_x = nn.Linear(x_dim + s_out_dim, h_dim)
         else:
             self.layer_x = nn.Linear(x_dim, h_dim)
@@ -96,15 +97,19 @@ class ScoreModel(nn.Module):
         x = torch.atleast_2d(x)
         t = torch.atleast_1d(t)
 
-        if s is not None:
+        x = x.float()
+
+        if self.image_encoder_x is not None:
+            x = self.image_encoder_x(x)
+
+        if s.numel() > 0:
             s = torch.atleast_2d(s)
-            if self.image_encoder is not None:
-                s = self.image_encoder(s)
+            if self.image_encoder_s is not None:
+                s = self.image_encoder_s(s)
             x = torch.cat([x, s], dim=-1)
 
         emb = self.time_emb(t)
 
-        x = x.float()
         x = self.layer_x(x)
 
         for layer in self.layers:
@@ -120,6 +125,149 @@ class ScoreModel(nn.Module):
 
         return x
 
+class ResNetBlock(nn.Module):
+    def __init__(self, in_features, hidden_dim, dropout_rate=0.1):
+        super(ResNetBlock, self).__init__()
+        self.layer = nn.Sequential(
+            nn.Dropout(dropout_rate),
+            nn.LayerNorm(in_features),
+            nn.Linear(in_features, 4*hidden_dim),
+            nn.ReLU(),
+            nn.Linear(4*hidden_dim, hidden_dim)
+        )
+
+    def forward(self, x):
+        identity = x
+        out = self.layer(x)
+        out += identity
+        return out
+
+
+class LN_Resnet(nn.Module):
+    def __init__(self, state_dim, action_dim, device, t_dim=16, hidden_size=256, dropout_rate=0.1):
+        super(LN_Resnet, self).__init__()
+        self.device = device
+
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(t_dim),
+            nn.Linear(t_dim, t_dim * 2),
+            nn.Mish(),
+            nn.Linear(t_dim * 2, t_dim),
+        )
+        input_dim = state_dim + action_dim + t_dim
+
+        self.input_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_size),
+            nn.ReLU(),
+        )
+        self.resnet_block1 = ResNetBlock(hidden_size, hidden_size, dropout_rate)
+        self.resnet_block2 = ResNetBlock(hidden_size, hidden_size, dropout_rate)
+        self.resnet_block3 = ResNetBlock(hidden_size, hidden_size, dropout_rate)
+        self.output_layer = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(hidden_size, action_dim)
+        )
+
+    def forward(self, x, time, state):
+        if len(time.shape) > 1:
+            time = time.squeeze(1)  # added for shaping t from (batch_size, 1) to (batch_size,)
+        t = self.time_mlp(time)
+        x = torch.cat([x, t, state], dim=1)
+        x = self.input_layer(x)
+        x = self.resnet_block1(x)
+        x = self.resnet_block2(x)
+        x = self.resnet_block3(x)
+        x = self.output_layer(x)
+        return x
+
+
+class Unet(nn.Module):
+    def __init__(self,
+        n_channel: int=3,
+        D: int = 64,
+        device: torch.device = torch.device("cuda"),
+        ) -> None:
+        super(Unet, self).__init__()
+        self.device = device
+
+        self.D = D
+
+        self.freqs = torch.exp(
+            -math.log(10000) * torch.arange(start=0, end=D, dtype=torch.float32) / D
+        )
+
+        blk = lambda ic, oc: nn.Sequential(
+            nn.GroupNorm(32, num_channels=ic),
+            nn.SiLU(),
+            nn.Conv2d(ic, oc, 3, padding=1),
+            nn.GroupNorm(32, num_channels=oc),
+            nn.SiLU(),
+            nn.Conv2d(oc, oc, 3, padding=1),
+        )
+
+        self.down = nn.Sequential(
+            *[
+                nn.Conv2d(n_channel, D, 3, padding=1),
+                blk(D, D),
+                blk(D, 2 * D),
+                blk(2 * D, 2 * D),
+            ]
+        )
+
+        self.time_downs = nn.Sequential(
+            nn.Linear(2 * D, D),
+            nn.Linear(2 * D, D),
+            nn.Linear(2 * D, 2 * D),
+            nn.Linear(2 * D, 2 * D),
+        )
+
+        self.mid = blk(2 * D, 2 * D)
+
+        self.up = nn.Sequential(
+            *[
+                blk(2 * D, 2 * D),
+                blk(2 * 2 * D, D),
+                blk(D, D),
+                nn.Conv2d(2 * D, 2 * D, 3, padding=1),
+            ]
+        )
+        self.last = nn.Conv2d(2 * D + n_channel, n_channel, 3, padding=1)
+
+    def forward(self, x, t, s=None) -> torch.Tensor:
+        # time embedding
+        x = x.float()
+
+        args = t.float().unsqueeze(-1).expand(-1, self.D) * self.freqs[None].to(t.device)
+        t_emb = torch.cat([torch.sin(args), torch.cos(args)], dim=-1).to(x.device)
+
+        x_ori = x
+
+        # perform F(x, t)
+        hs = []
+        for idx, layer in enumerate(self.down):
+            if idx % 2 == 1:
+                x = layer(x) + x
+            else:
+                x = layer(x)
+                x = F.interpolate(x, scale_factor=0.5)
+                hs.append(x)
+
+            x = x + self.time_downs[idx](t_emb)[:, :, None, None]
+
+        x = self.mid(x)
+
+        for idx, layer in enumerate(self.up):
+            if idx % 2 == 0:
+                x = layer(x) + x
+            else:
+                x = torch.cat([x, hs.pop()], dim=1)
+                x = F.interpolate(x, scale_factor=2, mode="nearest")
+                x = layer(x)
+
+        x = self.last(torch.cat([x, x_ori], dim=1))
+
+        return x
+
 
 class EnergyModel(nn.Module):
     """
@@ -128,111 +276,18 @@ class EnergyModel(nn.Module):
     Adds embedding for each scale after each linear layer.
     """
 
-    def __init__(self, net):
+    def __init__(self, net, image_encoder_x=None):
         super().__init__()
         self.net = net
+        self.image_encoder_x = image_encoder_x
 
     def neg_logp_unnorm(self, x, t, s):
         score = self.net(x, t, s)
-        return ((score - x) ** 2).sum(-1)
+        x = x.float()
+        if self.image_encoder_x is not None:
+            x = self.image_encoder_x(x)
+        return ((score - x) ** 2).sum(dim=tuple(range(1,len(x.shape))))
 
     def __call__(self, x, t, s):
         neg_logp_unnorm = lambda _x: self.neg_logp_unnorm(_x, t, s).sum()
         return torch.func.grad(neg_logp_unnorm)(x)
-
-
-
-# class ConditionalResnet(nn.Module):
-#     """
-#     Resnet score model.
-# 
-#     Adds embedding for each scale after each linear layer.
-#     """
-# 
-#     def __init__(self,
-#                  n_steps,
-#                  n_layers,
-#                  x_dim,
-#                  s_dim,
-#                  h_dim,
-#                  emb_dim,
-#                  widen=2,
-#                  emb_type='learned'):
-#         # assert emb_type in ('learned', 'sinusoidal')
-#         super().__init__()
-#         self._n_layers = n_layers
-#         self._n_steps = n_steps
-#         self._x_dim = x_dim
-#         self._s_dim = s_dim
-#         self._h_dim = h_dim
-#         self._emb_dim = emb_dim
-#         self._widen = widen
-#         self._emb_type = emb_type
-# 
-#         self.layer_x = nn.Linear(self._x_dim + self._s_dim, self._h_dim)
-# 
-#         self.layers = nn.ModuleList([
-#             nn.Sequential(
-#                 nn.Linear(h_dim, h_dim * widen),
-#                 nn.Linear(emb_dim, h_dim * widen),
-#                 nn.Linear(h_dim * widen, h_dim * widen),
-#                 nn.Linear(h_dim * widen, h_dim)
-#             )
-#             for _ in range(n_layers)
-# 
-#         ])
-# 
-#         self.last_layer = nn.Linear(self._h_dim, self._x_dim)
-# 
-#         for i in range(self._n_layers):
-#             nn.init.zeros_(self.layers[i][-1].weight)
-#         nn.init.zeros_(self.last_layer.weight)
-# 
-#         self.time_emb = nn.Embedding(self._n_steps, self._emb_dim)
-# 
-#     def forward(self, x, t, s):
-# 
-#         x = torch.atleast_2d(x)
-#         s = torch.atleast_2d(s)
-#         t = torch.atleast_1d(t)
-# 
-#         emb = self.time_emb(t)
-# 
-#         x = torch.cat([x, s], dim=-1)
-# 
-#         x = x.float()
-#         x = self.layer_x(x)
-# 
-#         for layer in self.layers:
-#             h = F.layer_norm(x, normalized_shape=x.size()[1:])
-#             h = F.silu(h)
-#             h = layer[0](h)
-#             h = h + layer[1](emb)
-#             h = F.silu(h)
-#             h = layer[2](h)
-#             x = x + layer[3](h)
-# 
-#         x = self.last_layer(x)
-# 
-#         return x
-
-
-
-# class ConditionalEBMDiffusionModel(nn.Module):
-#     """
-#     EBM parameterization on top of score model.
-# 
-#     Adds embedding for each scale after each linear layer.
-#     """
-# 
-#     def __init__(self, net):
-#         super().__init__()
-#         self.net = net
-# 
-#     def neg_logp_unnorm(self, x, t, s):
-#         score = self.net(x, t, s)
-#         return ((score - x) ** 2).sum(-1)
-# 
-#     def __call__(self, x, t, s):
-#         neg_logp_unnorm = lambda _x: self.neg_logp_unnorm(_x, t, s).sum()
-#         return torch.func.grad(neg_logp_unnorm)(x)

@@ -184,7 +184,7 @@ class Diffusion(pl.LightningModule):
   def forward(self, x, t, s):
     """Get mu_t-1 given x_t."""
     x = torch.atleast_2d(x)
-    s = torch.atleast_2d(s)
+#    s = torch.atleast_2d(s)
     t = torch.atleast_1d(t)
 
     outs = self.net(x, t, s)
@@ -269,11 +269,16 @@ class Diffusion(pl.LightningModule):
     return {'logpx': logpx}
 
 
-  def sample(self, s, n, clip=torch.inf):
+  def sample(self, s, n, clip=torch.inf, shape=None):
     """Sample from p(x)."""
 
-    x = torch.Tensor(np.random.normal(size=(n, self._dim))).to(self.device)
-    s = s.unsqueeze(0).expand((n, *s.shape))
+    if shape is None:
+      shape = (self._dim)
+
+    x = torch.Tensor(np.random.normal(size=(n, *shape))).to(self.device)
+#    x = torch.Tensor(np.random.normal(size=(n, *shape))).to("cpu")
+    if s is not None:
+      s = s.unsqueeze(0).expand((n, *s.shape))
 
     for i in range(self._n_steps):
       j = self._n_steps - 1 - i

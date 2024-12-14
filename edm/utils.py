@@ -62,13 +62,20 @@ def plot_hist(x):
 
 def get_value(key, step_data):
     if key == "obs_birdview":
-        return torch.Tensor(step_data.obs_birdview).squeeze()
+        return torch.Tensor(step_data[-1].obs_birdview).squeeze()
     if key == "recurrent_state":
-        return torch.Tensor(step_data.recurrent_states[0]).squeeze()
+        return torch.Tensor(step_data[-1].recurrent_states[0]).squeeze()
     if key == "action":
-        action = step_data.ego_action.squeeze()
+        action = step_data[-1].ego_action.squeeze()
         action[1] *= 10
         return action
+    if key == "stacked_obs_birdview":
+        birdviews = [torch.Tensor(item.obs_birdview).squeeze() for item in step_data]
+        stacked_obs_birdview = torch.cat(birdviews)
+#        print("stacked_obs_birdview shape")
+#        print(stacked_obs_birdview.shape)
+        return stacked_obs_birdview
+
 
 def get_episode_data(episode_file_path):
     obs_birdviews = []

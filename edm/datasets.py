@@ -27,7 +27,21 @@ class TorchDriveEnvEpisodeDataset(Dataset):
                 episode_data = pickle.load(f)
             if (constraints is not None) and ("location" in constraints) and (episode_data.location not in constraints["location"]):
                 continue
-            for step_data in episode_data.step_data:
+#            for step_data in episode_data.step_data:
+#                if len(diffusion_keys) == 1:
+#                    x = get_value(diffusion_keys[0], step_data)
+#                else:
+#                    x = "_".join([get_value(key, step_data) for key in diffusion_keys])
+#                if condition_keys is None:
+#                    s = torch.empty(0)
+#                elif len(condition_keys) == 1:
+#                    s = get_value(condition_keys[0], step_data)
+#                else:
+#                    s = "_".join([get_value(key, step_data) for key in condition_keys])
+#                self.data.append((x, s))
+
+            for i in range(len(episode_data.step_data) - 3):
+                step_data = episode_data.step_data[i: i+3]
                 if len(diffusion_keys) == 1:
                     x = get_value(diffusion_keys[0], step_data)
                 else:
@@ -46,8 +60,8 @@ class TorchDriveEnvEpisodeDataset(Dataset):
             self.s_dim = self.s_dim.item()
         if diffusion_keys == ['obs_birdview']:
             obs_birdviews = torch.stack([item[0] for item in self.data])
-            print("obs_birdviews shape")
-            print(obs_birdviews.shape)
+#            print("obs_birdviews shape")
+#            print(obs_birdviews.shape)
             self.x_std, self.x_mean = torch.std_mean(obs_birdviews / 255.0, dim=(0, 2, 3))
             print("std: ", self.x_std)
             print("mean: ", self.x_mean)

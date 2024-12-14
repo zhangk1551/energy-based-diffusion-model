@@ -1,9 +1,15 @@
 task: "torchdriveenv"
-diffusion_keys: ["obs_birdview"]
+diffusion_keys: ["stacked_obs_birdview"]
 data:
   train_data_dir: "data/selected_more_waypoints"
   val_data_dir: "data/tiny_test"
-  eval_obs_data_dirs: ["datasets/ppo_bad_policy_single/obs_data", "datasets/itra_single/obs_data", "datasets/irrelevant_obs_data_shuffled", "datasets/irrelevant_obs_data_cat"]
+#  eval_obs_data_dirs: ["datasets/ppo_bad_policy_single/obs_data", "datasets/itra_single/obs_data", "datasets/irrelevant_obs_data_shuffled", "datasets/irrelevant_obs_data_cat"]
+  eval_obs_data_dirs: ["datasets/itra_single/stacked_obs_data",
+                       "datasets/irrelevant_shuffled/stacked_obs_data",
+                       "datasets/irrelevant_cat/stacked_obs_data",
+                       "datasets/ppo_bad_policy_single/stacked_obs_data",
+                       "datasets/itra_multiple/stacked_obs_data",
+                       "datasets/itra_single_traffic_lights/stacked_obs_data"]
   batch_size: 128
   dataloader_num_workers: 32
 model:

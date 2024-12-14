@@ -26,7 +26,10 @@ class EDMModule(pl.LightningModule):
             image_encoder_x = None
 
 #        self.net = SimpleResNet(config=config.model, n_steps=config.diffusion.n_steps, x_dim=x_dim, s_dim=s_dim, image_encoder_x=image_encoder_x)
-        self.net = Unet()
+        if config.diffusion_keys == ["stacked_obs_birdview"]:
+            self.net = Unet(n_channel=9)
+        else:
+            self.net = Unet()
         self.ebm_net = EnergyModel(self.net, image_encoder_x=image_encoder_x)
         self.diffusion = Diffusion(config.diffusion, self.ebm_net, dim=x_dim)
 
@@ -51,6 +54,8 @@ class EDMModule(pl.LightningModule):
         with torch.no_grad():
             if self.config.diffusion_keys == ["obs_birdview"]:
                 self.evaluate_obs_samples()
+                self.evaluate_obs_distribution()
+            if self.config.diffusion_keys == ["stacked_obs_birdview"]:
                 self.evaluate_obs_distribution()
             if self.config.condition_keys is None:
                 self.diffusion.train()
@@ -87,10 +92,13 @@ class EDMModule(pl.LightningModule):
                 energy_list.append(energy.item())
             images.append(plot_hist(energy_list))
             means.append(sum(energy_list) / len(energy_list))
-        self.logger.log_image(key="state distributions", images=images, caption=[f"bad policy validation mean energy:{means[0]}",
-                                                                                 f"in-distribution validation mean energy:{means[1]}",
-                                                                                 f"irrelevant_shuffled validation mean energy:{means[2]}",
-                                                                                 f"irrelevant_cat validation mean energy:{means[3]}"])
+        self.logger.log_image(key="state distributions", images=images, caption=[f"in-distribution validation mean energy:{means[0]}",
+                                                                                 f"irrelevant_shuffled validation mean energy:{means[1]}",
+                                                                                 f"irrelevant_cat validation mean energy:{means[2]}",
+                                                                                 f"bad policy validation mean energy:{means[3]}",
+                                                                                 f"unseen_scenarios_multiple_agents validation mean energy:{means[4]}",
+                                                                                 f"unseen_scenarios_different_maps validation mean energy:{means[5]}"])
+
 
     def evaluate_obs_samples(self):
         obs_samples = self.diffusion.sample(s=None, n=self.n_eval_samples, shape=(3, 64, 64), clip=1.0)
